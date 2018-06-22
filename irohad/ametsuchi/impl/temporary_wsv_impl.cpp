@@ -47,17 +47,8 @@ namespace iroha {
       command_executor_->setCreatorAccountId(tx_creator);
       command_validator_->setCreatorAccountId(tx_creator);
       auto execute_command =
-          [this, &tx_creator](
-              auto &command,
-              int command_index) -> expected::Result<void, std::string> {
-        auto account = wsv_->getAccount(tx_creator);
-//        if (not account) {
-//          return expected::makeError(
-//              ((boost::format(
-//                    "stateful validation error: could not fetch account ")
-//                % tx_creator)
-//                   .str()));
-//        }
+          [this](auto &command,
+                 int command_index) -> expected::Result<void, std::string> {
         // Validate command
         return boost::apply_visitor(*command_validator_, command.get())
                    .match(
@@ -102,21 +93,26 @@ namespace iroha {
         tx_failed = true;
       };
 
-      const auto &commands = tx.commands();
-      for (size_t i = 0; i < commands.size(); ++i) {
-        execute_command(commands[i], i)
-            .match([](expected::Value<void>) {}, failed_cmd_processor);
-      };
+      // Check transaction validness
       apply_function(tx, *wsv_).match([](expected::Value<void>) {},
                                       failed_cmd_processor);
 
-      if (tx_failed) {
-        transaction_->exec("RELEASE SAVEPOINT savepoint_;");
-        return expected::makeError(commands_errors_log);
-      } else {
-        transaction_->exec("ROLLBACK TO SAVEPOINT savepoint_;");
-        return {};
+      if (not tx_failed) {
+        // Check commands validness
+        const auto &commands = tx.commands();
+        for (size_t i = 0; i < commands.size(); ++i) {
+          execute_command(commands[i], i)
+              .match([](expected::Value<void>) {}, failed_cmd_processor);
+        };
       }
+
+      if (tx_failed) {
+        transaction_->exec("ROLLBACK TO SAVEPOINT savepoint_;");
+        return expected::makeError(commands_errors_log);
+      }
+
+      transaction_->exec("RELEASE SAVEPOINT savepoint_;");
+      return {};
     }
 
     TemporaryWsvImpl::~TemporaryWsvImpl() {
