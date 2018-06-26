@@ -48,7 +48,7 @@ namespace iroha {
 
       notifier_.get_observable().subscribe(
           verified_proposal_subscription_,
-          [this](const shared_model::interface::types::VerifiedProposalAndErrors
+          [this](const iroha::validation::VerifiedProposalAndErrors
                      &verified_proposal_and_errors) {
             this->process_verified_proposal(
                 *verified_proposal_and_errors.first);
@@ -60,7 +60,7 @@ namespace iroha {
       verified_proposal_subscription_.unsubscribe();
     }
 
-    rxcpp::observable<shared_model::interface::types::VerifiedProposalAndErrors>
+    rxcpp::observable<iroha::validation::VerifiedProposalAndErrors>
     Simulator::on_verified_proposal() {
       return notifier_.get_observable();
     }
