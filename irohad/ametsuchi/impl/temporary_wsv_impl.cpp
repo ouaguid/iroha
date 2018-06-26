@@ -83,17 +83,17 @@ namespace iroha {
                     &tx]() -> expected::Result<void, std::string> {
         // check transaction's commands validness
         const auto &commands = tx.commands();
-        std::string error;
+        std::string cmd_error;
         for (size_t i = 0; i < commands.size(); ++i) {
           // in case of failed command, rollback and return
           if (not execute_command(commands[i], i)
                       .match([](expected::Value<void> &) { return true; },
-                             [&error](expected::Error<std::string> &error) {
-                               error = error.error;
+                             [&cmd_error](expected::Error<std::string> &error) {
+                               cmd_error = error.error;
                                return false;
                              })) {
             transaction_->exec("ROLLBACK TO SAVEPOINT savepoint_;");
-            return expected::makeError(error);
+            return expected::makeError(cmd_error);
           }
         }
         // success
