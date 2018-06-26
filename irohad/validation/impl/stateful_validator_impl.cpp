@@ -19,6 +19,7 @@
 
 #include <boost/format.hpp>
 #include <boost/range/adaptor/filtered.hpp>
+#include <boost/range/adaptor/indexed.hpp>
 #include <boost/range/adaptor/transformed.hpp>
 #include <string>
 #include "builders/protobuf/proposal.hpp"
@@ -32,12 +33,9 @@ namespace iroha {
       log_ = logger::log("SFV");
     }
 
-    shared_model::interface::types::VerifiedProposalAndErrors
-    StatefulValidatorImpl::validate(
+    validation::VerifiedProposalAndErrors StatefulValidatorImpl::validate(
         const shared_model::interface::Proposal &proposal,
         ametsuchi::TemporaryWsv &temporaryWsv) {
-      using namespace std::string_literals;
-
       log_->info("transactions in proposal: {}",
                  proposal.transactions().size());
       auto checking_transaction = [this](const auto &tx, auto &queries) {
@@ -79,11 +77,10 @@ namespace iroha {
               return expected::makeError(
                   (boost::format(
                        "stateful validator error: not enough "
-                       "signatures on account %s; account's quorum %d, "
+                       "signatures in transaction; account's quorum %d, "
                        "transaction's "
                        "signatures amount %d")
-                   % tx.creatorAccountId() % account->quorum()
-                   % boost::size(tx.signatures()))
+                   % account->quorum() % boost::size(tx.signatures()))
                       .str());
             } | [this, &tx](const auto &signatories)
                           -> expected::Result<void, std::string> {
@@ -93,37 +90,35 @@ namespace iroha {
                 return {};
               }
               return expected::makeError(
-                  formSignaturesErrorMsg(tx.signatures(), signatories));
+                  this->formSignaturesErrorMsg(tx.signatures(), signatories));
             });
       };
 
       // Filter only valid transactions and accumulate errors
       auto transactions_errors_log =
-          std::vector<std::pair<std::vector<std::string>, int>>{};
+          std::vector<std::pair<std::string, size_t>>{};
       auto filter = [&temporaryWsv,
                      checking_transaction,
-                     &transactions_errors_log](auto &tx, int tx_index) {
+                     &transactions_errors_log](auto &tx, size_t tx_index) {
         return temporaryWsv.apply(tx, checking_transaction)
             .match([](expected::Value<void> &) { return true; },
-                   [&transactions_errors_log, tx_index](
-                       expected::Error<std::vector<std::string>> &error) {
+                   [&transactions_errors_log,
+                    tx_index](expected::Error<std::string> &error) {
                      transactions_errors_log.push_back(
                          std::make_pair(error.error, tx_index));
                      return false;
                    });
       };
 
-      // TODO: kamilsa IR-1010 20.02.2018 rework validation logic, so that this
-      // cast is not needed and stateful validator does not know about the
-      // transport
-      std::vector<const shared_model::proto::Transaction> valid_proto_txs{};
-      for (auto i = 0; i < proposal.transactions().size(); ++i) {
-        const auto &tx = proposal.transactions()[i];
-        if (filter(tx, i)) {
-          valid_proto_txs.push_back(
-              static_cast<const shared_model::proto::Transaction &>(tx));
-        }
-      }
+      auto valid_proto_txs =
+          proposal.transactions() | boost::adaptors::indexed(0)
+          | boost::adaptors::filtered([&filter](auto indexed_tx) {
+              return filter(indexed_tx.value(), indexed_tx.index());
+            })
+          | boost::adaptors::transformed([](auto indexed_tx) {
+              return static_cast<const shared_model::proto::Transaction &>(
+                  indexed_tx.value());
+            });
 
       auto validated_proposal = shared_model::proto::ProposalBuilder()
                                     .createdTime(proposal.createdTime())
@@ -137,20 +132,18 @@ namespace iroha {
       return std::make_pair(std::make_shared<decltype(validated_proposal)>(
                                 validated_proposal.getTransport()),
                             transactions_errors_log);
-    }  // namespace validation
+    }
 
     std::string StatefulValidatorImpl::formSignaturesErrorMsg(
         const shared_model::interface::types::SignatureRangeType &signatures,
         const std::vector<shared_model::interface::types::PubkeyType>
             &signatories) {
-      using namespace std::string_literals;
-
-      std::string signatures_string = "", signatories_string = "";
+      std::string signatures_string, signatories_string;
       for (const auto &signature : signatures) {
-        signatures_string += signature.publicKey().toString() + "\n"s;
+        signatures_string.append(signature.publicKey().toString().append("\n"));
       }
       for (const auto &signatory : signatories) {
-        signatories_string += signatory.toString() + "\n"s;
+        signatories_string.append(signatory.toString().append("\n"));
       }
       return (boost::format(
                   "stateful validator error: signatures in transaction are not "

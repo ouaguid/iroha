@@ -64,7 +64,7 @@ namespace shared_model {
       /// Permission set
       using PermissionSetType = std::set<PermissionNameType>;
       /// Type of Quorum used in transaction and set quorum
-      using QuorumType = uint32_t;
+      using QuorumType = uint16_t;
       /// Type of signature range, which returns when signatures are invoked
       using SignatureRangeType = boost::any_range<const interface::Signature &,
                                                   boost::forward_traversal_tag>;
@@ -99,11 +99,6 @@ namespace shared_model {
                            const AccountAsset &>;
       /// Type of the transfer message
       using DescriptionType = std::string;
-      /// Type of verified proposal and errors appeared in the process; first
-      /// dimension of vector is transaction, second is commands
-      using VerifiedProposalAndErrors =
-          std::pair<std::shared_ptr<shared_model::interface::Proposal>,
-                    std::vector<std::pair<std::vector<std::string>, int>>>;
     }  // namespace types
   }    // namespace interface
 }  // namespace shared_model
